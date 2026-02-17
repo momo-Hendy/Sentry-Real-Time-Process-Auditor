@@ -1,0 +1,18 @@
+# Core LLM API (if using OpenAI)
+openai>=1.0.0
+
+# For environment variable management (API keys)
+python-dotenv>=1.0.0
+
+# JSON validation (for C ↔ Python contract safety)
+pydantic>=2.0.0
+
+# Optional: If running a local Llama model via llama-cpp
+llama-cpp-python>=0.2.0
+
+# Optional: If using HuggingFace models locally
+transformers>=4.35.0
+torch>=2.0.0
+
+# Logging & debugging
+rich>=13.0.0
