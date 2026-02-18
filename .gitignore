@@ -2,3 +2,4 @@ bin/
 test_sentry
 test_compiler.c
 *.o
+.env

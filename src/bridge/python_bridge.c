@@ -1,6 +1,6 @@
 #include <stdio.h>
 #include <time.h>
-#include "../../shared/sentry_types.h"
+#include "sentry_types.h"
 
 // This function acts as the "Bridge"
 void bridge_to_ai(ComplianceFinding finding) {

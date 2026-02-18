@@ -1,6 +1,6 @@
 # Compiler and Flags
 CC = gcc
-CFLAGS = -Wall -Wextra -g -I./shared
+CFLAGS = -Wall -Wextra -g -Ishared
 
 # Directories
 SRC_DIR = src/bridge

@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/sentry.schema.json",
+  "title": "Sentry C<->Python AI Bridge Schema (v1)",
+  "type": "object",
+  "properties": {
+    "request": {
+      "type": "object",
+      "properties": {
+        "pid": { "type": "integer" },
+        "name": { "type": "string" },
+        "path": { "type": "string" },
+        "cmdline": { "type": "string" },
+        "ppid": { "type": "integer" },
+        "timestamp": { "type": "string" }
+      },
+      "required": ["pid", "name"],
+      "additionalProperties": true
+    },
+    "response": {
+      "type": "object",
+      "properties": {
+        "risk": { "type": "string", "enum": ["low", "medium", "high", "unknown"] },
+        "summary": { "type": "string" },
+        "reasons": { "type": "array", "items": { "type": "string" } }
+      },
+      "required": ["risk", "summary"],
+      "additionalProperties": true
+    }
+  },
+  "required": [],
+  "additionalProperties": true
+}
