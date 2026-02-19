@@ -32,12 +32,7 @@ static void write_json_string(FILE *f, const char *src) {
 
 /*
  * bridge_to_ai - Receives a ComplianceFinding from the scanner engine
- * and appends it as a JSON object (NDJSON, one object per line) to
- * AUDIT_LOG for downstream AI analysis.
- *
- * ISO 27001:A.12.4.1 — Protection of log information.
- * fflush() is called before fclose() to guarantee the record is
- * written to disk even if the process is interrupted immediately after.
+ * and appends it as a JSON object (NDJSON) to AUDIT_LOG for AI analysis.
  */
 void bridge_to_ai(ComplianceFinding finding) {
     FILE *log_file = fopen(AUDIT_LOG, "a");
@@ -46,17 +41,19 @@ void bridge_to_ai(ComplianceFinding finding) {
         return;
     }
 
-    /* One JSON object per line (NDJSON) — valid JSON, easy to stream/parse */
+    /* * Unified JSON: Combines Mostafa's secure NDJSON format 
+     * with the field names Mohamed's AI expects.
+     */
     fprintf(log_file, "{");
     fprintf(log_file, "\"finding_id\":%d,",   finding.finding_id);
     fprintf(log_file, "\"severity\":%d,",     finding.severity);
-    fprintf(log_file, "\"iso_ref\":");         write_json_string(log_file, finding.iso_ref);
-    fprintf(log_file, ",\"description\":");    write_json_string(log_file, finding.description);
-    fprintf(log_file, ",\"source_app\":");     write_json_string(log_file, finding.source_app);
-    fprintf(log_file, ",\"timestamp\":");      write_json_string(log_file, finding.timestamp);
+    fprintf(log_file, "\"iso_ref\":");        write_json_string(log_file, finding.iso_ref);
+    fprintf(log_file, ",\"description\":");   write_json_string(log_file, finding.description);
+    fprintf(log_file, ",\"source_app\":");    write_json_string(log_file, finding.source_app);
+    fprintf(log_file, ",\"timestamp\":");     write_json_string(log_file, finding.timestamp);
     fprintf(log_file, "}\n");
 
-    fflush(log_file);   /* Flush to kernel buffer before close */
+    fflush(log_file);
     fclose(log_file);
 
     fprintf(stdout,
