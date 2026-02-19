@@ -1,0 +1,4 @@
+{"finding_id":1000,"severity":5,"iso_ref":"ISO27001:A.12.4.1","description":"File integrity changed: /app/test_files/secret.txt","source_app":"SentryScanner-Core","timestamp":"2026-02-19T20:02:04"}
+{"finding_id":1000,"severity":5,"iso_ref":"ISO27001:A.12.4.1","description":"File integrity changed: /app/test_files/secret.txt","source_app":"SentryScanner-Core","timestamp":"2026-02-19T20:02:07"}
+{"finding_id":1000,"severity":5,"iso_ref":"ISO27001:A.12.4.1","description":"File integrity changed: /app/test_files/secret.txt","source_app":"SentryScanner-Core","timestamp":"2026-02-19T20:02:55"}
+{"finding_id":1000,"severity":5,"iso_ref":"ISO27001:A.12.4.1","description":"File integrity changed: /app/test_files/secret.txt","source_app":"SentryScanner-Core","timestamp":"2026-02-19T20:02:58"}

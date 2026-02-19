@@ -13,21 +13,75 @@
 #include "scanner.h"
 #include "baseline.h"
 #include "../comparator/hasher.h"
+static int global_finding_id = 1000;
 
 extern void bridge_to_ai(ComplianceFinding finding);
 
-#define LOG_FILE "/var/log/sentry.log"
-#define BASELINE_PATH "/var/lib/sentry/baseline.db"
+#define LOG_FILE           "/var/log/sentry.log"
+#define BASELINE_PATH      "/var/lib/sentry/baseline.db"
 #define BASELINE_HASH_PATH "/var/lib/sentry/baseline.hash"
+#define SOURCE_APP         "SentryScanner-C"
+#define ISO_REF            "ISO27001:A.12.4.1"
 
-
-/* Forward declarations */
+/* ── Forward declarations ─────────────────────────────────────────────── */
 static void log_event(const char *filepath, const char *event_type);
 static void deletion_alert(const char *path);
 static void scan_directory_internal(const char *path);
 
+/* ── Finding helpers ──────────────────────────────────────────────────── */
 
-static int verify_baseline_integrity() {
+/*
+ * init_finding - zero the struct, assign a unique incrementing ID,
+ * and set the fields that are constant across all findings.
+ * Every call site MUST call this before populating severity/description.
+ */
+static void init_finding(ComplianceFinding *f) {
+    static int next_id = 1;
+
+    memset(f, 0, sizeof(ComplianceFinding));
+
+    f->finding_id = next_id++;
+
+    strncpy(f->iso_ref,    ISO_REF,    sizeof(f->iso_ref)    - 1);
+    strncpy(f->source_app, SOURCE_APP, sizeof(f->source_app) - 1);
+}
+
+/*
+ * stamp_finding - populate the ISO-8601 timestamp immediately before
+ * the finding is handed off to bridge_to_ai().
+ */
+static void stamp_finding(ComplianceFinding *f) {
+    // 1. Assign a unique ID for this specific event
+    f->finding_id = global_finding_id++;
+
+    // 2. Tag the source so Mohamed knows this came from the C Scanner
+    strncpy(f->source_app, "SentryScanner-Core", sizeof(f->source_app) - 1);
+
+    // 3. Generate a precise ISO-8601 Timestamp
+    time_t now = time(NULL);
+    struct tm *tm_info = localtime(&now);
+    strftime(f->timestamp, sizeof(f->timestamp), "%Y-%m-%dT%H:%M:%S", tm_info);
+}
+
+/* ── ISO-compliant file logger ────────────────────────────────────────── */
+
+static void log_event(const char *filepath, const char *event_type) {
+
+    FILE *log = fopen(LOG_FILE, "a");
+    if (!log) return;
+
+    time_t now = time(NULL);
+    char timestamp[64];
+    struct tm *tm_info = localtime(&now);
+    strftime(timestamp, sizeof(timestamp), "%Y-%m-%d %H:%M:%S", tm_info);
+
+    fprintf(log, "[%s] EVENT=%s PATH=%s\n", timestamp, event_type, filepath);
+    fclose(log);
+}
+
+/* ── Baseline integrity ───────────────────────────────────────────────── */
+
+static int verify_baseline_integrity(void) {
 
     char current_hash[65];
     char stored_hash[65];
@@ -37,13 +91,12 @@ static int verify_baseline_integrity() {
 
     FILE *file = fopen(BASELINE_HASH_PATH, "r");
     if (!file)
-        return 0; // First run, no hash yet
+        return 0;   /* First run — no stored hash yet */
 
     if (!fgets(stored_hash, sizeof(stored_hash), file)) {
         fclose(file);
         return -1;
     }
-
     fclose(file);
 
     stored_hash[strcspn(stored_hash, "\n")] = '\0';
@@ -53,18 +106,12 @@ static int verify_baseline_integrity() {
         log_event(BASELINE_PATH, "BASELINE_TAMPERED");
 
         ComplianceFinding finding;
-        memset(&finding, 0, sizeof(ComplianceFinding));
-
-        finding.severity = 10;
-
-        strncpy(finding.iso_ref,
-                "ISO27001:A.12.4.1",
-                sizeof(finding.iso_ref) - 1);
-
-        snprintf(finding.description,
-                 sizeof(finding.description),
+        memset(&finding,0,sizeof(ComplianceFinding));
+        init_finding(&finding);
+        finding.severity = 5;
+        snprintf(finding.description, sizeof(finding.description),
                  "Baseline file integrity compromised");
-
+        stamp_finding(&finding);
         bridge_to_ai(finding);
 
         return -1;
@@ -73,10 +120,9 @@ static int verify_baseline_integrity() {
     return 0;
 }
 
-static void update_baseline_hash() {
+static void update_baseline_hash(void) {
 
     char hash[65];
-
     if (calculate_sha256(BASELINE_PATH, hash) != 0)
         return;
 
@@ -87,61 +133,26 @@ static void update_baseline_hash() {
     fclose(file);
 }
 
-/*
- * ISO-compliant logging
- */
-static void log_event(const char *filepath,
-                      const char *event_type) {
+/* ── Per-file integrity check ─────────────────────────────────────────── */
 
-    FILE *log = fopen(LOG_FILE, "a");
-    if (!log) return;
-
-    time_t now = time(NULL);
-    char timestamp[64];
-    struct tm *tm_info = localtime(&now);
-
-    strftime(timestamp,
-             sizeof(timestamp),
-             "%Y-%m-%d %H:%M:%S",
-             tm_info);
-
-    fprintf(log,
-            "[%s] EVENT=%s PATH=%s\n",
-            timestamp,
-            event_type,
-            filepath);
-
-    fclose(log);
-}
-
-/*
- * Secure file integrity check
- */
 static void check_file(const char *filepath) {
 
     struct stat file_stat;
 
-    /* Use lstat to prevent following symlinks */
+    /* lstat: never follow symlinks */
     if (lstat(filepath, &file_stat) != 0)
         return;
 
-    /* If it's a symlink → suspicious */
+    /* Symlink in a monitored directory is suspicious */
     if (S_ISLNK(file_stat.st_mode)) {
         log_event(filepath, "SYMLINK_DETECTED");
 
         ComplianceFinding finding;
-        memset(&finding, 0, sizeof(ComplianceFinding));
-
+        init_finding(&finding);
         finding.severity = 5;
-        strncpy(finding.iso_ref,
-                "ISO27001:A.12.4.1",
-                sizeof(finding.iso_ref) - 1);
-
-        snprintf(finding.description,
-                 sizeof(finding.description),
-                 "Symbolic link detected: %s",
-                 filepath);
-
+        snprintf(finding.description, sizeof(finding.description),
+                 "Symbolic link detected: %s", filepath);
+        stamp_finding(&finding);
         bridge_to_ai(finding);
         return;
     }
@@ -149,11 +160,11 @@ static void check_file(const char *filepath) {
     if (!S_ISREG(file_stat.st_mode))
         return;
 
-    char current_hash[65];
-    char stored_hash[65];
-    mode_t stored_mode;
-    uid_t stored_uid;
-    gid_t stored_gid;
+    char    current_hash[65];
+    char    stored_hash[65];
+    mode_t  stored_mode;
+    uid_t   stored_uid;
+    gid_t   stored_gid;
 
     mode_t current_mode = file_stat.st_mode;
     uid_t  current_uid  = file_stat.st_uid;
@@ -162,54 +173,37 @@ static void check_file(const char *filepath) {
     if (calculate_sha256(filepath, current_hash) != 0)
         return;
 
-    if (get_file_metadata(filepath,
-                          stored_hash,
-                          &stored_mode,
-                          &stored_uid,
-                          &stored_gid) != 0) {
-
-        update_file_metadata(filepath,
-                             current_hash,
-                             current_mode,
-                             current_uid,
-                             current_gid);
+    /* New file — record its baseline and move on */
+    if (get_file_metadata(filepath, stored_hash,
+                          &stored_mode, &stored_uid, &stored_gid) != 0) {
+        update_file_metadata(filepath, current_hash,
+                             current_mode, current_uid, current_gid);
         return;
     }
 
+    /* Something changed — hash, permissions, or ownership */
     if (strcmp(stored_hash, current_hash) != 0 ||
-        stored_mode != current_mode ||
-        stored_uid  != current_uid  ||
+        stored_mode != current_mode           ||
+        stored_uid  != current_uid            ||
         stored_gid  != current_gid) {
 
         log_event(filepath, "INTEGRITY_VIOLATION");
 
-        update_file_metadata(filepath,
-                             current_hash,
-                             current_mode,
-                             current_uid,
-                             current_gid);
+        update_file_metadata(filepath, current_hash,
+                             current_mode, current_uid, current_gid);
 
         ComplianceFinding finding;
-        memset(&finding, 0, sizeof(ComplianceFinding));
-
+        init_finding(&finding);
         finding.severity = 5;
-
-        strncpy(finding.iso_ref,
-                "ISO27001:A.12.4.1",
-                sizeof(finding.iso_ref) - 1);
-
-        snprintf(finding.description,
-                 sizeof(finding.description),
-                 "File integrity changed: %s",
-                 filepath);
-
+        snprintf(finding.description, sizeof(finding.description),
+                 "File integrity changed: %s", filepath);
+        stamp_finding(&finding);
         bridge_to_ai(finding);
     }
 }
 
-/*
- * Secure recursive scan
- */
+/* ── Recursive directory scanner ──────────────────────────────────────── */
+
 static void scan_directory_internal(const char *path) {
 
     DIR *dir = opendir(path);
@@ -224,19 +218,12 @@ static void scan_directory_internal(const char *path) {
             strcmp(entry->d_name, "..") == 0)
             continue;
 
-        snprintf(fullpath,
-                 sizeof(fullpath),
-                 "%s/%s",
-                 path,
-                 entry->d_name);
+        snprintf(fullpath, sizeof(fullpath), "%s/%s", path, entry->d_name);
 
         struct stat statbuf;
-
-        /* Use lstat to avoid following symlinks */
         if (lstat(fullpath, &statbuf) != 0)
             continue;
 
-        /* If symlink → log and skip */
         if (S_ISLNK(statbuf.st_mode)) {
             log_event(fullpath, "SYMLINK_DETECTED");
             continue;
@@ -252,45 +239,29 @@ static void scan_directory_internal(const char *path) {
     closedir(dir);
 }
 
-/*
- * Public entry
- */
-void scan_directory(const char *path) {
+/* ── Deletion alert ───────────────────────────────────────────────────── */
 
-    verify_baseline_integrity();
-
-    load_baseline();
-
-    scan_directory_internal(path);
-
-    detect_deleted_files(deletion_alert);
-
-    save_baseline();
-
-    update_baseline_hash();
-}
-
-
-/*
- * Deletion alert
- */
 static void deletion_alert(const char *path) {
 
     log_event(path, "FILE_DELETED");
 
     ComplianceFinding finding;
-    memset(&finding, 0, sizeof(ComplianceFinding));
-
+    init_finding(&finding);
     finding.severity = 5;
-
-    strncpy(finding.iso_ref,
-            "ISO27001:A.12.4.1",
-            sizeof(finding.iso_ref) - 1);
-
-    snprintf(finding.description,
-             sizeof(finding.description),
-             "Critical file deleted: %s",
-             path);
-
+    snprintf(finding.description, sizeof(finding.description),
+             "Critical file deleted: %s", path);
+    stamp_finding(&finding);
     bridge_to_ai(finding);
+}
+
+/* ── Public entry point ───────────────────────────────────────────────── */
+
+void scan_directory(const char *path) {
+
+    verify_baseline_integrity();
+    load_baseline();
+    scan_directory_internal(path);
+    detect_deleted_files(deletion_alert);
+    save_baseline();
+    update_baseline_hash();
 }
