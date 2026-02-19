@@ -22,6 +22,7 @@ extern void bridge_to_ai(ComplianceFinding finding);
 
 
 /* Forward declarations */
+static void log_event(const char *filepath, const char *event_type);
 static void deletion_alert(const char *path);
 static void scan_directory_internal(const char *path);
 
