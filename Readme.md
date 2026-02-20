@@ -22,6 +22,7 @@ The Bridge (JSON): A platform-aware logging system that synchronizes data betwee
 The Brain (Python): A watcher script that processes findings, performs AI classification, and determines the final "Verdict" (Authorized vs. Malicious).
 
 Project Team and Roles
+
 Mostafa Ali | Project Lead and Cybersecurity Specialist
 Systems Architecture: Engineered the native Win32/POSIX file scanning logic and the custom standalone SHA-256 implementation.
 
