@@ -1,6 +1,7 @@
 #ifndef SENTRY_BASELINE_H
 #define SENTRY_BASELINE_H
 
+#include "../../shared/sentry_win_compat.h"  /* uid_t, gid_t on Windows */
 #include <sys/types.h>
 
 int load_baseline();

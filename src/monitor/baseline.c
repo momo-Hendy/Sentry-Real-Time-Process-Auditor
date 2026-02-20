@@ -1,5 +1,8 @@
-#define _XOPEN_SOURCE 700
+#ifndef _WIN32
+#  define _XOPEN_SOURCE 700
+#endif
 
+#include "../../shared/sentry_win_compat.h"  /* uid_t, gid_t, PATH_MAX on Windows */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -9,7 +12,11 @@
 
 #include "baseline.h"
 
-#define BASELINE_FILE "/var/lib/sentry/baseline.db"
+#ifdef _WIN32
+#  define BASELINE_FILE "db\\baseline.db"
+#else
+#  define BASELINE_FILE "/var/lib/sentry/baseline.db"
+#endif
 #define MAX_TRACKED_FILES 4096
 #define HASH_LENGTH 65   // 64 hex chars + null
 

@@ -4,8 +4,12 @@
 #include <time.h>
 #include "../../shared/sentry_types.h"
 
-#define AUDIT_LOG "/app/logs/audit.json"
-
+/* Audit log path — relative on Windows (portable), absolute on Linux */
+#ifdef _WIN32
+#  define AUDIT_LOG "logs\\audit.json"
+#else
+#  define AUDIT_LOG "/app/logs/audit.json"
+#endif
 /*
  * Writes a JSON-escaped string (with surrounding quotes) to f.
  * Handles backslash, double-quote, and ASCII control characters.

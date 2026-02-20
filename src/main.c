@@ -1,23 +1,36 @@
-#define _POSIX_C_SOURCE 200809L
+/* Platform detection must come before any includes */
+#ifdef _WIN32
+#  define WIN32_LEAN_AND_MEAN
+#  define _WIN32_WINNT 0x0600
+#  include <windows.h>
+#  include <direct.h>           /* _mkdir */
+#else
+#  define _POSIX_C_SOURCE 200809L
+#  include <unistd.h>
+#  include <time.h>
+#endif
+
+#include "monitor/scanner.h"    /* scan_directory — now works on both platforms */
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <signal.h>
-#include <unistd.h>
 #include <sys/stat.h>
 #include <errno.h>
-#include <time.h>
-
-#include "monitor/scanner.h"
 
 #define CONFIG_PATH      "config/sentry.conf"
-#define DEFAULT_TARGET   "/app/test_files"
-#define DEFAULT_INTERVAL 30000          /* ms — used only if config is missing */
+#define DEFAULT_INTERVAL 30000  /* ms */
+
+#ifdef _WIN32
+#  define DEFAULT_TARGET   "test_files"
+#else
+#  define DEFAULT_TARGET   "/app/test_files"
+#endif
 
 /* ── Graceful shutdown ───────────────────────────────────────────────── */
 
-static volatile sig_atomic_t keep_running = 1;
+static volatile int keep_running = 1;
 
 static void handle_signal(int sig) {
     (void)sig;
@@ -27,16 +40,29 @@ static void handle_signal(int sig) {
 /* ── Helpers ─────────────────────────────────────────────────────────── */
 
 static void ensure_dir(const char *path) {
-    if (mkdir(path, 0755) == 0 || errno == EEXIST)
+#ifdef _WIN32
+    int rc = _mkdir(path);
+#else
+    int rc = mkdir(path, 0755);
+#endif
+    if (rc == 0 || errno == EEXIST)
         return;
-    fprintf(stderr, "[main] WARNING: cannot create directory %s: %s\n",
+    fprintf(stderr, "[main] WARNING: cannot create directory '%s': %s\n",
             path, strerror(errno));
 }
 
-/*
- * Minimal KEY=VALUE parser.  Only SCAN_TARGET and SCAN_INTERVAL are read;
- * all other lines (including comments starting with #) are skipped.
- */
+static void sleep_ms(int ms) {
+#ifdef _WIN32
+    Sleep((DWORD)ms);
+#else
+    struct timespec ts = {
+        .tv_sec  = 0,
+        .tv_nsec = (long)ms * 1000000L
+    };
+    nanosleep(&ts, NULL);
+#endif
+}
+
 static void parse_config(const char *path,
                           char *target, size_t target_len,
                           int  *interval_ms) {
@@ -48,14 +74,11 @@ static void parse_config(const char *path,
 
     char line[512];
     while (fgets(line, sizeof(line), f)) {
-        line[strcspn(line, "\n")] = '\0';           /* strip newline */
-
-        if (line[0] == '#' || line[0] == '\0')      /* skip comments / blanks */
-            continue;
+        line[strcspn(line, "\n")] = '\0';
+        if (line[0] == '#' || line[0] == '\0') continue;
 
         char *eq = strchr(line, '=');
         if (!eq) continue;
-
         *eq = '\0';
         const char *key = line;
         const char *val = eq + 1;
@@ -66,21 +89,22 @@ static void parse_config(const char *path,
             *interval_ms = atoi(val);
         }
     }
-
     fclose(f);
 }
 
 /* ── Entry point ─────────────────────────────────────────────────────── */
 
 int main(void) {
-    /* Register SIGINT (Ctrl+C) and SIGTERM for clean shutdown */
+#ifdef _WIN32
+    signal(SIGINT, handle_signal);
+#else
     struct sigaction sa;
     memset(&sa, 0, sizeof(sa));
     sa.sa_handler = handle_signal;
     sigaction(SIGINT,  &sa, NULL);
     sigaction(SIGTERM, &sa, NULL);
+#endif
 
-    /* Defaults (overridden by config file) */
     char target[256];
     int  interval_ms = DEFAULT_INTERVAL;
     snprintf(target, sizeof(target), "%s", DEFAULT_TARGET);
@@ -88,39 +112,40 @@ int main(void) {
     parse_config(CONFIG_PATH, target, sizeof(target), &interval_ms);
 
     if (interval_ms <= 0) {
-        fprintf(stderr, "[main] WARNING: invalid SCAN_INTERVAL in config, "
-                        "defaulting to %d ms\n", DEFAULT_INTERVAL);
+        fprintf(stderr, "[main] WARNING: invalid SCAN_INTERVAL — defaulting to %d ms\n",
+                DEFAULT_INTERVAL);
         interval_ms = DEFAULT_INTERVAL;
     }
 
-    /* Ensure required directories are present before the first scan */
+    /*
+     * Directory setup — platform specific:
+     *   Linux  : /var/lib/sentry  /var/log  /app/logs
+     *   Windows: .\db             .\logs    (relative, portable)
+     */
+#ifdef _WIN32
+    ensure_dir("logs");   /* audit.json and sentry.log live here */
+    ensure_dir("db");     /* baseline.db and baseline.hash live here */
+#else
     ensure_dir("/var/lib/sentry");
     ensure_dir("/var/log");
     ensure_dir("/app/logs");
+#endif
 
     fprintf(stdout,
             "[Sentry] Started  —  target='%s'  interval=%d ms\n"
-            "[Sentry] Send SIGINT (Ctrl+C) or SIGTERM to stop.\n",
+            "[Sentry] Press Ctrl+C to stop.\n",
             target, interval_ms);
 
-    /* ── Main scan loop ── */
     while (keep_running) {
         fprintf(stdout, "[Sentry] Scanning '%s' ...\n", target);
         fflush(stdout);
 
         scan_directory(target);
 
-        /*
-         * Sleep in 100 ms slices so Ctrl+C is noticed quickly
-         * rather than blocking for the full interval.
-         */
+        /* Responsive sleep: check keep_running every 100 ms */
         int remaining_ms = interval_ms;
         while (keep_running && remaining_ms > 0) {
-            struct timespec ts = {
-                .tv_sec  = 0,
-                .tv_nsec = 100L * 1000000L  /* 100 ms */
-            };
-            nanosleep(&ts, NULL);
+            sleep_ms(100);
             remaining_ms -= 100;
         }
     }
